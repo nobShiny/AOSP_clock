@@ -8,6 +8,7 @@ import android.graphics.Canvas;
 import android.graphics.drawable.Drawable;
 import android.icu.util.TimeZone;
 import android.os.Build;
+import android.os.SystemClock;
 import android.support.annotation.RequiresApi;
 import android.text.format.Time;
 import android.util.AttributeSet;
@@ -35,6 +36,7 @@ public class AnalogClock extends View {
      */
     private Drawable mHourHand;
     private Drawable mMinuteHand;
+    private Drawable mSecondHand;
     private Drawable mDial;
 
     /**
@@ -47,6 +49,7 @@ public class AnalogClock extends View {
      */
     private float mHours;
     private float mMinutes;
+    private float mSeconds;
 
     /**
      * 跟踪View 的尺寸的变化
@@ -59,8 +62,14 @@ public class AnalogClock extends View {
     private boolean isAttached;
 
     /**
-     *
+     *刷新时间线程
      */
+    private Thread refreshThread;
+
+    /**
+     * 秒针刷新的时间
+     */
+    private float refresh_time = 1000;
 
     public AnalogClock(Context context) {
         this(context, null);
@@ -78,12 +87,15 @@ public class AnalogClock extends View {
         super(context, attrs, defStyleAttr, defStyleRes);
 
         //        final Resources r = context.getResources();
-
+        refreshThread = new Thread();
         if (mHourHand == null) {
             mHourHand = context.getDrawable(R.drawable.clock_hand_hour);
         }
         if (mMinuteHand == null) {
             mMinuteHand = context.getDrawable(R.drawable.clock_hand_minute);
+        }
+        if (mSecondHand == null) {
+            mSecondHand = context.getDrawable(R.drawable.clock_hand_second);
         }
         if (mDial == null) {
             mDial = context.getDrawable(R.drawable.clock_dial);
@@ -125,24 +137,12 @@ public class AnalogClock extends View {
         isChanged = true;
     }
 
-    /**
-     * 监听时间变化
-     */
-    private void onTimeChange() {
-        mTime.setToNow();
-        int hour = mTime.hour;
-        int minute = mTime.minute;
-        int second = mTime.second;
-
-        mMinutes = minute + second / 60.0f;
-        mHours = hour + minute / 60.0f;
-        isChanged = true;
-    }
 
     /**
      * 接受时间变化的系统广播
      */
     private final BroadcastReceiver mIntentReceiver = new BroadcastReceiver() {
+
         @RequiresApi(api = Build.VERSION_CODES.N)
         @Override
         public void onReceive(Context context, Intent intent) {
@@ -166,6 +166,20 @@ public class AnalogClock extends View {
     @Override
     protected void onAttachedToWindow() {
         super.onAttachedToWindow();
+        mTime = new Time();
+        refreshThread = new Thread(new Runnable() {
+            @Override
+            public void run() {
+                while (true) {
+                    //设置更新界面的刷新时间
+                    SystemClock.sleep((long) refresh_time);
+//                    postInvalidate();
+                    onTimeChange();
+                }
+            }
+        });
+        refreshThread.start();
+
         if (!isAttached) {
             isAttached = true;
             IntentFilter filter = new IntentFilter();
@@ -174,7 +188,7 @@ public class AnalogClock extends View {
             filter.addAction(Intent.ACTION_TIME_TICK);
             getContext().registerReceiver(mIntentReceiver, filter);
         }
-        mTime = new Time();
+
         onTimeChange();
     }
 
@@ -184,10 +198,26 @@ public class AnalogClock extends View {
     @Override
     protected void onDetachedFromWindow() {
         super.onDetachedFromWindow();
+        refreshThread.interrupt();
         if (isAttached) {
             getContext().unregisterReceiver(mIntentReceiver);
             isAttached = false;
         }
+    }
+
+    /**
+     * 监听时间变化
+     */
+    private void onTimeChange() {
+        mTime.setToNow();
+        int hour = mTime.hour;
+        int minute = mTime.minute;
+        int second = mTime.second;
+
+        mSeconds = second / 60.0f;
+        mMinutes = minute + second / 60.0f;
+        mHours = hour + minute / 60.0f;
+        isChanged = true;
     }
 
     @Override
@@ -248,6 +278,20 @@ public class AnalogClock extends View {
         }
         minuteHand.draw(canvas);
         canvas.restore();
+        canvas.save();
+
+        //处理秒针
+        canvas.rotate(mSeconds / 60.0f * 360.0f, x, y);
+        final Drawable secondHand = mSecondHand;
+
+        if (changed) {
+            w = secondHand.getIntrinsicWidth();
+            h = secondHand.getIntrinsicHeight();
+            secondHand.setBounds(x - (w / 2), y - (h / 2), x + (w / 2), y + (h / 2));
+        }
+        secondHand.draw(canvas);
+        canvas.restore();
+        canvas.save();
 
         //缩放坐标复原
         if (scaled) {
